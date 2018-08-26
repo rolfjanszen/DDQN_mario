@@ -10,3 +10,9 @@ tensorflow
 numpy
 
 Run: $python3 mario_ai.py
+
+
+I have not yet run this for longer periods of time.
+
+The learning rate and epsilon are set high initially to speed up learning at the beginning. But decay at a rate of 0.01 at each training step.
+
