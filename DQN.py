@@ -131,8 +131,8 @@ class DQN:
 
 
         # indices = np.random.permutation(max_len)[:batch_size]
-        # indices = np.random.randint(max_len, size=(batch_size))
-        indices = range(len(self.states))
+        indices = np.random.randint(max_len, size=(batch_size))
+        # indices = range(len(self.states))
         val_ind =  int(max_len/5)
         valuable_indeces  = sorted_r[-val_ind:]
 
@@ -163,7 +163,6 @@ class DQN:
         print('observation ',len(observation))
         Qv = self.tf_sess.run(self.online_netw,
                               feed_dict={self.X_state: observation[np.newaxis, :], self.is_training_ph: False})
-
         return Qv
 
     def get_next_q_value(self, next_observations, rewards, re_done, actions):
