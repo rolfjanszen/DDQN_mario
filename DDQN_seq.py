@@ -3,13 +3,17 @@ import tensorflow as tf
 from tensorflow.python.ops import rnn, rnn_cell
 import numpy as np
 import os
+import cv2
+
+from visualizer import *
+
 
 
 class DDQN_seq(DQN):
 
     rnn_size = 50
     epsilon = 0.15
-    epsilon_decay = 1#0.99
+    epsilon_decay = 0.99
     saver = None
     lr =0.001
 
@@ -22,10 +26,10 @@ class DDQN_seq(DQN):
         self.input_sz = inp_sz
         self.output_sz = out_sz
         self.X_state = tf.placeholder(tf.float32, shape= self.input_sz, name="state")
-        self.X_next_state = tf.placeholder(tf.float32, shape = self.input_sz, name="state")
+        self.X_next_state = tf.placeholder(tf.float32, shape = self.input_sz, name="next_state")
         self.next_actions = tf.placeholder(tf.int32, shape=[None], name="action")
         self.q_target = tf.placeholder(tf.float32, shape=[None], name="q_target")
-        self.is_training_ph = tf.placeholder(dtype=tf.bool, shape=())
+        self.is_training = tf.placeholder(dtype=tf.bool, shape=())
         self.n_chunks = chunks
         # self.save_path = None
         self.im_width = inp_sz[2]
@@ -63,82 +67,121 @@ class DDQN_seq(DQN):
     def model(self, x, name, trainable, reuse):
 
         with tf.variable_scope(name) as scope:
-            sequences = []
+
+            self.sequences = []
+
             x =tf.transpose(x, [1, 0, 2,3,4])
             # x = tf.reshape(x, [-1, self.n_chunks])
             x = tf.split(x, self.n_chunks, 0)
 
-            filter1 = tf.Variable(tf.random_normal([9, 9, 1, 16]))
-            filter2 = tf.Variable(tf.random_normal([9, 9, 16, 32]))
-            filter3 = tf.Variable(tf.random_normal([9, 9, 32, 64]))
+            filter1 = tf.Variable(tf.random_normal([9, 9, 1, 16]), name='filter1')
+            filter2 = tf.Variable(tf.random_normal([9, 9, 16, 32]),name='filter2')
+            filter3 = tf.Variable(tf.random_normal([3, 3, 32, 64]),name='filter3')
+            filter4 = tf.Variable(tf.random_normal([3, 3, 64, 64]),name='filter4')
 
             for im in x:
 
                 im = tf.reshape(im, [-1, self.im_width, self.im_heigth, 1])
+                im = tf.divide(im,255)
+                layer1 = tf.nn.conv2d(im, filter1, [1, 2, 2, 1], 'VALID', name='layer1')
+                layer1 = tf.nn.leaky_relu(layer1)
+                self.layer1 = layer1
+                layer2 = tf.nn.conv2d(self.layer1, filter2, [1, 2, 2, 1], 'VALID')
+                layer2 = tf.nn.leaky_relu(layer2)
+                self.layer2 = layer2
+                layer3 = tf.nn.conv2d(layer2, filter3, [1, 2, 2, 1], 'VALID')
+                layer3 = tf.nn.leaky_relu(layer3)
 
-                layer1 = tf.nn.conv2d(im, filter1, [1, 4, 4, 1], 'SAME')
-                layer1 = tf.nn.relu(layer1)
-
-                layer2 = tf.nn.conv2d(layer1, filter2, [1, 4, 4, 1], 'SAME')
-                layer2 = tf.nn.relu(layer2)
-
-                layer3 = tf.nn.conv2d(layer2, filter3, [1, 4, 4, 1], 'SAME')
-                layer3 = tf.nn.relu(layer3)
-                layer3 = tf.contrib.layers.flatten(layer3)
+                layer4 = tf.nn.conv2d(layer3, filter4, [1, 2, 2, 1], 'VALID')
+                self.layer4 = tf.nn.leaky_relu(layer4)
+                print('l4 ',self.layer4.shape)
+                input_layer = tf.contrib.layers.flatten(self.layer4)
                 # new_seq = self.cnn_model(im)
-                print('layer3 ', layer3.shape, self.rnn_size)
-                sequences.append(layer3)
-
-
+                print('input_layer ', input_layer.shape, self.rnn_size)
+                self.sequences.append(input_layer)
 
             layer = {'weights': tf.Variable(tf.random_normal([self.rnn_size, self.output_sz])),
                      'biases': tf.Variable(tf.random_normal([self.output_sz]))}
 
             lstm_cell = rnn_cell.BasicLSTMCell(self.rnn_size, state_is_tuple=True)
-            outputs, states = rnn.static_rnn(lstm_cell, sequences, dtype=tf.float32)
+            outputs, states = rnn.static_rnn(lstm_cell, self.sequences, dtype=tf.float32)
             print('outputs ',len(outputs), outputs)
-            output = tf.matmul(outputs[-1], layer['weights']) + layer['biases']
-
-            trainable_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=scope.name)
+            self.lyout = outputs
+            dense1 = tf.matmul(outputs[-1], layer['weights']) + layer['biases']
+            # dense1 = tf.layers.dense(outputs,100,'relu')
+            output = tf.layers.dense(dense1, self.output_sz)
+            self.vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES , scope=scope.name)
+            # self.vars = tf.get_collection(tf.GraphKeys.LOCAL_VARIABLES, scope=scope.name)
 
             trainable_vars_by_name = {var.name[len(scope.name):]:
-                                          var for var in trainable_vars}
+                                          var for var in self.vars}
 
         return output, trainable_vars_by_name
 
-    def prep_train_data(self):
+    def prep_train_data(self, states, rewards, actions, done, next_state):
 
         seq_states = []
         seq_next_states = []
 
-        for i in range(self.n_chunks, len(self.states)):
+
+        for i in range(self.n_chunks, len(states)):
 
             new_seq_state =[]
             new_seq_next_state = []
 
             for j in range(i,i-self.n_chunks,-1):
 
-                new_seq_next_state.append(self.next_states[j])
-                new_seq_state.append(self.states[j])
+                new_seq_next_state.append(next_state[j])
+                new_seq_state.append(states[j])
 
             seq_states.append(np.array(new_seq_state))
             seq_next_states.append(np.array(new_seq_next_state))
 
         seq_states = np.reshape(seq_states, (len(seq_states), self.n_chunks, self.im_width, self.im_heigth, 1))
         seq_next_states = np.reshape(seq_next_states, (len(seq_next_states), self.n_chunks, self.im_width, self.im_heigth, 1))
-        self.states = seq_states
-        self.next_states = seq_next_states
+        states = seq_states
+        next_state = seq_next_states
 
-        self.rewards = self.rewards[self.n_chunks:]
-        self.actions = self.actions[self.n_chunks:]
-        self.is_final_state = self.is_final_state[self.n_chunks:]
+        kernel = self.tf_sess.run(self.online_vars['/filter1:0'])
+        kernel = np.squeeze(kernel)
+        k4_im = visualize_filter(kernel,4)
+        cv2.imshow('k4_im',k4_im)
+        cv2.waitKey(10)
+        rewards = rewards[self.n_chunks:]
+        actions = actions[self.n_chunks:]
+        is_final_state = done[self.n_chunks:]
+        return states, rewards, actions, is_final_state, next_state
+
+
+    def get_filers(self):
+        with tf.variable_scope("online",reuse=tf.AUTO_REUSE):
+            f1 = tf.get_variable('filter1',(9,9,1,16))
+            f2 = tf.get_variable('filter2',(9,9,16,32))
+        with self.tf_sess as sess:
+            print('f1 ',f1.eval())
 
 
     def get_values(self, observation):
 
         # print('observation ',len(observation),self.input_sz)
+        cv2.imshow('obz ',observation[0])
+        cv2.waitKey(20)
         input = np.reshape(observation, (1, self.n_chunks, self.im_width, self.im_heigth, 1))
-        Qv = self.tf_sess.run(self.online_netw,
-                              feed_dict={self.X_state: input, self.is_training_ph: False})
+        # output = np.reshape(observation, (1, ks, self.im_width, self.im_heigth, 1))
+        Qv = self.tf_sess.run(self.online_netw, feed_dict={self.X_state: input, self.is_training: False})
+        l1 = self.tf_sess.run(self.layer1,
+                              feed_dict={self.X_state: input, self.X_next_state: input, self.is_training: False})
+        l4 = self.tf_sess.run(self.layer4, feed_dict={self.X_state: input, self.X_next_state: input,self.is_training: False})
+        print(Qv)
+        l1 = np.squeeze(l1)
+        layer1_im=visualize_filter(l1,1)
+        cv2.imshow('layer1',layer1_im)
+        for i in range(2):
+
+            im_l= spread_bit_val((l4[0, :, :, i]))
+            cv2.imshow('im_l', im_l)
+            # im = np.array(np.reshape(im_l,(14,14)),dtype=np.uint8)
+
+            cv2.waitKey(2)
 
         return Qv
