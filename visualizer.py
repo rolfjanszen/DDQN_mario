@@ -31,10 +31,10 @@ def visualize_filter(kernel, scale):
             pos_Y += (dims_y +spacer)
             pos_X = 0
 
-        print('pos ' ,pos_X ,pos_Y)
+        # print('pos ' ,pos_X ,pos_Y)
         normal_im = spread_bit_val(kernel[: ,: ,i])
         grid[pos_X:(pos_X +dims_x) ,pos_Y:(pos_Y +dims_y)] = normal_im
-        print(' kernel ',kernel[: ,: ,i])
+        # print(' kernel ',kernel[: ,: ,i])
         pos_X += (dims_x +spacer)
 
     grid = np.array(grid, dtype=np.uint8)
@@ -50,7 +50,7 @@ def spread_bit_val(float_image):
 
     kern_max = np.max(float_image)
     kern_min = np.min(float_image)
-    print(' kenr max min ',kern_min, kern_max)
+    # print(' kenr max min ',kern_min, kern_max)
     float_image -= kern_min
     float_image = float_image * (200 / (kern_max - kern_min))
 
