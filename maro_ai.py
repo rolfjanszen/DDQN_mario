@@ -49,9 +49,7 @@ for i_episode in range(1000):
     done = False
     # observation_set.append(observation)
     while not done and timer < 100:
-        print('observation shape ',observation.shape)
-
-
+        # print('observation shape ',observation.shape)
         # if len(observation_set) > seq_len:
         #         observation_set.pop()
 

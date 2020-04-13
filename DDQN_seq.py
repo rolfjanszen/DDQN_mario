@@ -30,10 +30,13 @@ class DDQN_seq(DDQN):
         self.next_actions = tf.placeholder(tf.int32, shape=[None], name="action")
         self.q_target = tf.placeholder(tf.float32, shape=[None], name="q_target")
         self.is_training = tf.placeholder(dtype=tf.bool, shape=())
+        self.conv_lstm = tf.keras.layers.ConvLSTM2D(64, 3)
+
         self.n_chunks = chunks
         # self.save_path = None
         self.im_width = inp_sz[2]
         self.im_heigth = inp_sz[3]
+
         print('get online netw')
         self.online_netw, self.online_vars = self.model(self.X_state, 'online', trainable=True, reuse=None)
         print('get target netw')
@@ -78,7 +81,10 @@ class DDQN_seq(DDQN):
             filter2 = tf.Variable(tf.random_normal([3, 3, 16, 32]),name='filter2')
             filter3 = tf.Variable(tf.random_normal([3, 3, 32, 64]),name='filter3')
             filter4 = tf.Variable(tf.random_normal([3, 3, 64, 64]),name='filter4')
-            
+
+
+
+
             sequences = []
             for im in x:
 
@@ -86,6 +92,7 @@ class DDQN_seq(DDQN):
                 im = tf.divide(im,255)
                 layer1 = tf.nn.conv2d(im, filter1, [1, 2, 2, 1], 'VALID', name='layer1')
                 layer1 = tf.nn.leaky_relu(layer1)
+                # tf.nn.max_pool2d(layer1,2,2)
                 self.layer1 = layer1
                 layer2 = tf.nn.conv2d(self.layer1, filter2, [1, 2, 2, 1], 'VALID')
                 layer2 = tf.nn.leaky_relu(layer2)
@@ -98,19 +105,28 @@ class DDQN_seq(DDQN):
 
                 # self.layer4 = tf.nn.max_pool(layer4, ksize=[1, 2, 2, 1], strides=[1, 2,2, 1], padding='SAME')
                 print('l4 ',self.layer4.shape)
-                input_layer = tf.contrib.layers.flatten(self.layer4)
+                # input_layer = tf.contrib.layers.flatten(self.layer4)
                 # new_seq = self.cnn_model(im)
-                print('input_layer ', input_layer.shape, self.rnn_size)
-                sequences.append(input_layer)
 
-            lstm_cell = rnn_cell.BasicLSTMCell(self.rnn_size, state_is_tuple=True)
-            outputs, states = rnn.static_rnn(lstm_cell, sequences, dtype=tf.float32)
-            print('outputs ',len(outputs), outputs)
+                self.layer4 = tf.expand_dims(self.layer4,1)
+                # print('input_layer ', input_layer.shape, self.rnn_size)
+                sequences.append(self.layer4)
+            sequences = tf.concat(sequences,1)
+            outputs = self.conv_lstm(sequences)
 
-            layer = {'weights': tf.Variable(tf.random_normal([self.rnn_size,500])),
-                     'biases': tf.Variable(tf.random_normal([500]))}
+            last_sequence = sequences[:, -1]
+            last_sequence = tf.nn.max_pool2d(last_sequence,2,2, 'VALID')
+            last_sequence = tf.nn.leaky_relu(last_sequence)
+            input_layer = tf.contrib.layers.flatten(last_sequence)
 
-            dense1 = tf.layers.dense(outputs[-1], 500, kernel_regularizer=tf.nn.l2_loss,
+            # lstm_cell = rnn_cell.(self.rnn_size, state_is_tuple=True)
+            # outputs, states = rnn.static_rnn(lstm_cell, sequences, dtype=tf.float32)
+            print('outputs ', input_layer)
+
+            # layer = {'weights': tf.Variable(tf.random_normal([self.rnn_size,500])),
+            #          'biases': tf.Variable(tf.random_normal([500]))}
+
+            dense1 = tf.layers.dense(input_layer, 500, kernel_regularizer=tf.nn.l2_loss,
                                      bias_regularizer=tf.nn.l2_loss)
 
             dense1 = tf.nn.tanh(dense1)
@@ -202,8 +218,8 @@ class DDQN_seq(DDQN):
 
     def get_values(self, observation):
         # print('observation ',len(observation),self.input_sz)
-        cv2.imshow('obz ', observation[-1])
-        cv2.waitKey(20)
+        # cv2.imshow('obz ', observation[-1])
+        # cv2.waitKey(20)
         # input = np.array([])
         input = np.reshape(np.array(observation), (1, self.n_chunks, self.im_width, self.im_heigth, self.channels))
         # for obs  in observation:
@@ -220,15 +236,15 @@ class DDQN_seq(DDQN):
                               feed_dict={self.X_state: input, self.X_next_state: input, self.is_training: False})
         l4 = self.tf_sess.run(self.layer4,
                               feed_dict={self.X_state: input, self.X_next_state: input, self.is_training: False})
-        print(' Qv' ,Qv)
+        # print(' Qv' ,Qv)
         l1 = np.squeeze(l1)
         layer1_im = visualize_filter(l1, 1)
         cv2.imshow('layer1', layer1_im)
-        for i in range(2):
-            im_l = spread_bit_val((l4[0, :, :, i]))
-            cv2.imshow('im_l', im_l)
-            # im = np.array(np.reshape(im_l,(14,14)),dtype=np.uint8)
-
-            cv2.waitKey(2)
+        # for i in range(1):
+        #     im_l = spread_bit_val((l4[0, :, :, i]))
+        #     cv2.imshow('im_l', im_l)
+        #     # im = np.array(np.reshape(im_l,(14,14)),dtype=np.uint8)
+        #
+        cv2.waitKey(2)
 
         return Qv
